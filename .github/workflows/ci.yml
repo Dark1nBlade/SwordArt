@@ -1,0 +1,21 @@
+name: CIS Audit CI
+
+on: [push, pull_request]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          pip install .
+      - name: Run Audit
+        run: |
+          # Example run against a dummy file
+          echo "config system global\n set admin-https-redirect enable\n end" > dummy.conf
+          fortigate-cis-audit --file dummy.conf --fail-on-critical
