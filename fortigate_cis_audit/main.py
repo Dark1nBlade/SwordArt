@@ -2,6 +2,7 @@ import click
 import sys
 import yaml
 import os
+import webbrowser
 from fortigate_cis_audit.connectors.base import FileConnector, SSHConnector, APIConnector
 from fortigate_cis_audit.parsers.fortios_parser import parse_config
 from fortigate_cis_audit.engine.audit_engine import AuditEngine
@@ -13,7 +14,6 @@ from fortigate_cis_audit.checks.sections4_7 import CheckNTPConfigured, CheckIKEv
 from fortigate_cis_audit.models import Status, Severity, CISLevel
 
 def get_all_checks():
-    # In a real app, this might use discovery
     return [
         CheckHTTPSOnly(),
         CheckIdleTimeout(),
@@ -33,7 +33,8 @@ def get_all_checks():
 @click.option('--file', help='Path to offline config file')
 @click.option('--profile', help='Path to YAML profile for credentials/target')
 @click.option('--output', type=click.Choice(['console', 'json', 'html', 'csv']), default='console')
-@click.option('--report-dir', default='.', help='Directory to save reports')
+@click.option('--report-dir', default='reports', help='Directory to save reports')
+@click.option('--dashboard', is_flag=True, help='Generate HTML dashboard and open in browser')
 @click.option('--level', type=click.Choice(['L1', 'L2', 'all']), default='all', help='Filter by CIS benchmark level')
 @click.option('--section', help='Comma-separated section numbers to run (e.g., 1,3,5)')
 @click.option('--severity', type=click.Choice(['Critical', 'High', 'Medium', 'Low', 'Info']), help='Filter findings by severity')
@@ -41,7 +42,7 @@ def get_all_checks():
 @click.option('--fail-on-critical', is_flag=True, help='Exit with code 1 if any critical finding')
 @click.option('--list-checks', is_flag=True, help='List all available checks and exit')
 @click.option('--check-id', help='Run only a specific check ID')
-def main(host, user, password, key, file, profile, output, report_dir, level, section, severity, exclude, fail_on_critical, list_checks, check_id):
+def main(host, user, password, key, file, profile, output, report_dir, dashboard, level, section, severity, exclude, fail_on_critical, list_checks, check_id):
     """FortiGate CIS Audit Tool"""
 
     all_available_checks = get_all_checks()
@@ -105,20 +106,30 @@ def main(host, user, password, key, file, profile, output, report_dir, level, se
 
     reporter = Reporter(report)
 
+    os.makedirs(report_dir, exist_ok=True)
+    report_path = ""
+
+    if dashboard:
+        output = 'html'
+        report_path = os.path.join(report_dir, "audit_dashboard.html")
+
     if output == 'console':
         reporter.to_console()
     elif output == 'json':
         click.echo(reporter.to_json())
     elif output == 'html':
         html_content = reporter.to_html()
-        os.makedirs(report_dir, exist_ok=True)
-        with open(f"{report_dir}/audit_report.html", "w") as f:
+        if not report_path:
+            report_path = os.path.join(report_dir, "audit_report.html")
+        with open(report_path, "w") as f:
             f.write(html_content)
-        click.echo(f"Report saved to {report_dir}/audit_report.html")
+        click.echo(f"Report saved to {report_path}")
+        if dashboard:
+            webbrowser.open(f"file://{os.path.abspath(report_path)}")
     elif output == 'csv':
-        os.makedirs(report_dir, exist_ok=True)
-        reporter.to_csv(f"{report_dir}/audit_report.csv")
-        click.echo(f"Report saved to {report_dir}/audit_report.csv")
+        report_path = os.path.join(report_dir, "audit_report.csv")
+        reporter.to_csv(report_path)
+        click.echo(f"Report saved to {report_path}")
 
     if fail_on_critical:
         criticals = [f for f in report.findings if f.severity == Severity.CRITICAL and f.status == Status.FAIL]
