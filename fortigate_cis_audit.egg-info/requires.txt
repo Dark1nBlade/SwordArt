@@ -1,0 +1,6 @@
+paramiko
+requests
+rich
+jinja2
+pyyaml
+click

@@ -1,0 +1,2 @@
+[console_scripts]
+fortigate-cis-audit = fortigate_cis_audit.main:main
