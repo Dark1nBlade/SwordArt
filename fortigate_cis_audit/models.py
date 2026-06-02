@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 
 class Severity(Enum):
     CRITICAL = "Critical"
@@ -10,10 +11,15 @@ class Severity(Enum):
     INFO = "Info"
 
 class Status(Enum):
+    # CIS Statuses
     PASS = "Pass"
     FAIL = "Fail"
     WARN = "Warn"
     SKIP = "Skip"
+    # Security Statuses
+    PERFORMED = "Performed"
+    FAILED = "Failed"
+    SKIPPED = "Skipped"
 
 class CISLevel(Enum):
     L1 = "L1"
@@ -23,21 +29,56 @@ class CISLevel(Enum):
 class Finding:
     check_id: str
     title: str
-    level: CISLevel
     severity: Severity
-    status: Status
+    status: Optional[Status] = None # For CIS compatibility
     message: str = ""
     remediation: str = ""
-    section: str = ""
+    evidence: str = ""
+    effort_estimate: str = "Low"
+    level: Optional[CISLevel] = None # For CIS compatibility
+    section: str = "" # For CIS compatibility
+
+@dataclass
+class SecurityCheckResult:
+    check_name: str
+    status: Status
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    duration_seconds: float = 0.0
+    findings: List[Finding] = field(default_factory=list)
+    error_message: Optional[str] = None
+    skip_reason: Optional[str] = None
+    severity: Severity = Severity.INFO
 
 @dataclass
 class AuditReport:
-    findings: List[Finding] = field(default_factory=list)
+    check_results: List[SecurityCheckResult] = field(default_factory=list)
+    findings: List[Finding] = field(default_factory=list) # For CIS compatibility
     metadata: Dict[str, Any] = field(default_factory=dict)
+    version: str = "0.2.0"
 
     def get_score(self) -> float:
+        # CIS score compatibility
         total = len([f for f in self.findings if f.status != Status.SKIP])
         if total == 0:
             return 0.0
         passed = len([f for f in self.findings if f.status == Status.PASS])
         return (passed / total) * 100
+
+    def get_risk_score(self) -> float:
+        performed = [r for r in self.check_results if r.status in [Status.PERFORMED, Status.PASS]]
+        if not performed: return 0.0
+
+        score = 0
+        for r in performed:
+            for f in r.findings:
+                if f.severity == Severity.CRITICAL: score += 10
+                elif f.severity == Severity.HIGH: score += 5
+                elif f.severity == Severity.MEDIUM: score += 2
+        return score
+
+    def get_summary(self) -> Dict[str, int]:
+        return {
+            "performed": len([r for r in self.check_results if r.status in [Status.PERFORMED, Status.PASS]]),
+            "failed": len([r for r in self.check_results if r.status in [Status.FAILED, Status.FAIL]]),
+            "skipped": len([r for r in self.check_results if r.status in [Status.SKIPPED, Status.SKIP]])
+        }
