@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fortigate-cis-audit"
+version = "0.1.0"
+description = "Audit FortiGate configurations against CIS Benchmark"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Jules", email = "jules@example.com" }
+]
+dependencies = [
+    "paramiko",
+    "requests",
+    "rich",
+    "jinja2",
+    "pyyaml",
+    "click"
+]
+
+[project.scripts]
+fortigate-cis-audit = "fortigate_cis_audit.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fortigate_cis_audit*"]
