@@ -44,6 +44,21 @@ class Reporter:
 
         console.print(table)
 
+        # Show detailed findings and remediations
+        any_findings = False
+        for r in self.report.check_results:
+            if r.findings:
+                if not any_findings:
+                    console.print(f"\n[bold]Detailed Findings & Remediations[/bold]")
+                    any_findings = True
+
+                for f in r.findings:
+                    sev_color = "red" if f.severity in [Severity.CRITICAL, Severity.HIGH] else "yellow" if f.severity == Severity.MEDIUM else "blue"
+                    console.print(f"\n[{sev_color}][{f.severity.value}][/{sev_color}] [bold]{f.title}[/bold]")
+                    console.print(f"  Issue: {f.message}")
+                    if f.remediation:
+                        console.print(f"  [green]Remediation:[/green] {f.remediation}")
+
     def to_json(self) -> str:
         data = {
             "version": self.report.version,

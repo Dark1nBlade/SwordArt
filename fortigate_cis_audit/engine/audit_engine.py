@@ -11,13 +11,15 @@ class AuditEngine:
                  fail_fast: bool = False,
                  include_checks: Optional[List[str]] = None,
                  skip_checks: Optional[List[str]] = None,
-                 severity_threshold: Optional[str] = None):
+                 severity_threshold: Optional[str] = None,
+                 wan_interfaces: Optional[List[str]] = None):
         self.config = config
         self.checks = checks
         self.fail_fast = fail_fast
         self.include_checks = include_checks
         self.skip_checks = skip_checks
         self.severity_threshold = severity_threshold
+        self.wan_interfaces = wan_interfaces or []
         self.console = Console()
 
     def run(self) -> AuditReport:
@@ -41,6 +43,10 @@ class AuditEngine:
                  continue
 
             try:
+                # Pass wan_interfaces if the check supports it
+                if hasattr(check, 'wan_interfaces'):
+                    check.wan_interfaces = self.wan_interfaces
+
                 result = check.audit(self.config)
 
                 # Compatibility: if result is a Finding (CIS), wrap it

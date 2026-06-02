@@ -36,6 +36,7 @@ class ReviewSecurityPolicies(BaseCheck):
 class CheckRuleShadowing(BaseCheck):
     check_id = "SEC-03"
     title = "Check for Rule Shadowing"
+    remediation = "Reorder or consolidate policies to eliminate shadowed rules."
     def audit(self, config: Dict[str, Any]) -> SecurityCheckResult:
         # Simple heuristic: exact duplicates in src/dst/service
         policies = config.get("config firewall policy", {}).get("edit", {})
@@ -49,7 +50,7 @@ class CheckRuleShadowing(BaseCheck):
                     title="Rule Shadowing Detected",
                     severity=Severity.MEDIUM,
                     message=f"Policy {p_id} might be shadowed by {seen[key]}",
-                    remediation="Reorder or consolidate policies."
+                    remediation=self.remediation
                 ))
             else:
                 seen[key] = p_id
@@ -58,19 +59,22 @@ class CheckRuleShadowing(BaseCheck):
 class AuditNATRules(BaseCheck):
     check_id = "SEC-04"
     title = "Audit NAT Rules"
+    remediation = "Ensure all NAT rules (VIPs) are necessary and limited to required services."
     def audit(self, config: Dict[str, Any]) -> SecurityCheckResult:
         vips = config.get("config firewall vip", {}).get("edit", {})
         findings = [Finding(
             check_id=self.check_id,
             title="NAT Rule Analysis",
             severity=Severity.INFO,
-            message=f"Found {len(vips)} Virtual IPs configured."
+            message=f"Found {len(vips)} Virtual IPs configured.",
+            remediation=self.remediation
         )]
         return self.create_result(Status.PERFORMED, findings=findings)
 
 class ValidateVPN(BaseCheck):
     check_id = "SEC-05"
     title = "Validate VPN Configurations"
+    remediation = "Upgrade to IKEv2: config vpn ipsec phase1-interface; edit <name>; set ike-version 2; next; end"
     def audit(self, config: Dict[str, Any]) -> SecurityCheckResult:
         vpns = config.get("config vpn ipsec phase1-interface", {}).get("edit", {})
         findings = []
@@ -81,13 +85,14 @@ class ValidateVPN(BaseCheck):
                     title="Weak IKE Version",
                     severity=Severity.HIGH,
                     message=f"VPN {name} uses IKEv1",
-                    remediation="Upgrade to IKEv2"
+                    remediation=self.remediation
                 ))
         return self.create_result(Status.PERFORMED, findings=findings)
 
 class AssessLogging(BaseCheck):
     check_id = "SEC-06"
     title = "Assess Logging and Monitoring"
+    remediation = "Enable remote syslog: config log syslogd setting; set status enable; end"
     def audit(self, config: Dict[str, Any]) -> SecurityCheckResult:
         syslog = config.get("config log syslogd setting", {})
         if syslog.get("status") != "enable":
@@ -96,7 +101,7 @@ class AssessLogging(BaseCheck):
                 title="Logging Disabled",
                 severity=Severity.CRITICAL,
                 message="Remote syslog is not enabled",
-                remediation="Enable syslogd"
+                remediation=self.remediation
             )
             return self.create_result(Status.PERFORMED, findings=[finding])
         return self.create_result(Status.PERFORMED)
@@ -104,6 +109,7 @@ class AssessLogging(BaseCheck):
 class EvaluateAppLayer(BaseCheck):
     check_id = "SEC-07"
     title = "Evaluate Application Layer Inspection"
+    remediation = "Enable Application Control on all relevant firewall policies: set appctrl <profile-name>"
     def audit(self, config: Dict[str, Any]) -> SecurityCheckResult:
         policies = config.get("config firewall policy", {}).get("edit", {})
         missing_app_ctrl = [p_id for p_id, p_data in policies.items() if not p_data.get("appctrl")]
@@ -113,7 +119,8 @@ class EvaluateAppLayer(BaseCheck):
                 check_id=self.check_id,
                 title="Missing Application Control",
                 severity=Severity.MEDIUM,
-                message=f"Policies {', '.join(missing_app_ctrl)} lack application control profiles."
+                message=f"Policies {', '.join(missing_app_ctrl)} lack application control profiles.",
+                remediation=self.remediation
             ))
         return self.create_result(Status.PERFORMED, findings=findings)
 
@@ -135,6 +142,7 @@ class PerformVulnScan(BaseCheck):
 class ReviewChangeMgmt(BaseCheck):
     check_id = "SEC-10"
     title = "Review Change Management Procedures"
+    remediation = "Enable revision backup on logout: config system global; set revision-backup-on-logout enable; end"
     def audit(self, config: Dict[str, Any]) -> SecurityCheckResult:
         # Checks if 'revision-backup-on-logout' is enabled
         global_cfg = config.get("config system global", {})
@@ -143,7 +151,8 @@ class ReviewChangeMgmt(BaseCheck):
                  check_id=self.check_id,
                  title="Change Tracking Weakness",
                  severity=Severity.LOW,
-                 message="Revision backup on logout is disabled."
+                 message="Revision backup on logout is disabled.",
+                 remediation=self.remediation
              )])
         return self.create_result(Status.PERFORMED)
 
@@ -165,3 +174,38 @@ class ImplementRemediation(BaseCheck):
     title = "Implement Remediation Actions"
     def audit(self, config: Dict[str, Any]) -> SecurityCheckResult:
         return self.create_result(Status.SKIPPED, skip_reason="manual_action_required")
+
+class CheckIPSConfigured(BaseCheck):
+    check_id = "SEC-14"
+    title = "Verify IPS is enabled on policies"
+    remediation = "Enable IPS profile on firewall policies, especially those facing the internet: set ips-sensor <profile-name>"
+    wan_interfaces: List[str] = []
+
+    def audit(self, config: Dict[str, Any]) -> SecurityCheckResult:
+        policies = config.get("config firewall policy", {}).get("edit", {})
+        findings = []
+
+        for p_id, p_data in policies.items():
+            ips_enabled = p_data.get("ips-sensor")
+            srcintf = p_data.get("srcintf")
+            dstintf = p_data.get("dstintf")
+
+            is_wan_policy = False
+            if self.wan_interfaces:
+                if srcintf in self.wan_interfaces or dstintf in self.wan_interfaces:
+                    is_wan_policy = True
+
+            if not ips_enabled:
+                severity = Severity.HIGH if is_wan_policy else Severity.MEDIUM
+                findings.append(Finding(
+                    check_id=self.check_id,
+                    title="IPS Not Enabled",
+                    severity=severity,
+                    message=f"Policy {p_id} ({srcintf} -> {dstintf}) does not have IPS enabled.",
+                    remediation=self.remediation
+                ))
+
+        if not findings:
+            return self.create_result(Status.PERFORMED)
+
+        return self.create_result(Status.PERFORMED, findings=findings)

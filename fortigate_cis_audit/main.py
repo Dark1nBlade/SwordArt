@@ -15,7 +15,8 @@ from fortigate_cis_audit.checks.sections4_7 import CheckNTPConfigured, CheckIKEv
 from fortigate_cis_audit.checks.security_checks import (
     DocumentConfig, ReviewSecurityPolicies, CheckRuleShadowing, AuditNATRules,
     ValidateVPN, AssessLogging, EvaluateAppLayer, CheckFirmware, PerformVulnScan,
-    ReviewChangeMgmt, TestFirewallRules, CreateAuditReport, ImplementRemediation
+    ReviewChangeMgmt, TestFirewallRules, CreateAuditReport, ImplementRemediation,
+    CheckIPSConfigured
 )
 from fortigate_cis_audit.models import Status, Severity, CISLevel
 
@@ -43,7 +44,8 @@ def get_all_checks():
         ReviewChangeMgmt(),
         TestFirewallRules(),
         CreateAuditReport(),
-        ImplementRemediation()
+        ImplementRemediation(),
+        CheckIPSConfigured()
     ]
 
 @click.command()
@@ -64,8 +66,12 @@ def get_all_checks():
 @click.option('--fail-fast', is_flag=True, help='Stop execution on first failed check')
 @click.option('--fail-on-critical', is_flag=True, help='Exit with code 1 if any critical finding')
 @click.option('--list-checks', is_flag=True, help='List all available checks and exit')
+@click.option('--list-zones', is_flag=True, help='List all configured zones and exit')
+@click.option('--list-interfaces', is_flag=True, help='List all configured interfaces and exit')
+@click.option('--wan', multiple=True, help='List of WAN interfaces (example: --wan port1 --wan port2)')
 def main(host, user, password, key, file, profile, output, report_dir, dashboard,
-         include_checks, skip_checks, level, section, severity_threshold, fail_fast, fail_on_critical, list_checks):
+         include_checks, skip_checks, level, section, severity_threshold, fail_fast, fail_on_critical, list_checks,
+         list_zones, list_interfaces, wan):
     """FortiGate CIS & Security Audit Tool"""
 
     all_available_checks = get_all_checks()
@@ -77,7 +83,7 @@ def main(host, user, password, key, file, profile, output, report_dir, dashboard
             click.echo(f"- {c.check_id}: {c.title}{desc}")
         return
 
-    # Load profile if provided
+    # Connection and config retrieval
     if profile and os.path.exists(profile):
         with open(profile, 'r') as f:
             p_data = yaml.safe_load(f)
@@ -108,6 +114,29 @@ def main(host, user, password, key, file, profile, output, report_dir, dashboard
 
     parsed_config = parse_config(config_text)
 
+    if list_zones:
+        zones = parsed_config.get("config system zone", {}).get("edit", {})
+        if not zones:
+            click.echo("No zones configured.")
+        else:
+            click.echo("Configured Zones:")
+            for zone_name, zone_data in zones.items():
+                interface = zone_data.get("interface", "None")
+                click.echo(f"- {zone_name} (Interfaces: {interface})")
+        return
+
+    if list_interfaces:
+        interfaces = parsed_config.get("config system interface", {}).get("edit", {})
+        if not interfaces:
+            click.echo("No interfaces configured.")
+        else:
+            click.echo("Configured Interfaces:")
+            for intf_name, intf_data in interfaces.items():
+                ip = intf_data.get("ip", "N/A")
+                allowaccess = intf_data.get("allowaccess", "None")
+                click.echo(f"- {intf_name}: {ip} (Allow: {allowaccess})")
+        return
+
     # Filter checks
     checks_to_run = all_available_checks
 
@@ -124,7 +153,8 @@ def main(host, user, password, key, file, profile, output, report_dir, dashboard
         fail_fast=fail_fast,
         include_checks=list(include_checks),
         skip_checks=list(skip_checks),
-        severity_threshold=severity_threshold
+        severity_threshold=severity_threshold,
+        wan_interfaces=list(wan)
     )
     report = engine.run()
 
