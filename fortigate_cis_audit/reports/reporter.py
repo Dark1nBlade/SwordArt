@@ -1,6 +1,6 @@
 from rich.console import Console
 from rich.table import Table
-from fortigate_cis_audit.models import AuditReport, Status
+from fortigate_cis_audit.models import AuditReport, Status, Severity
 import json
 import csv
 from jinja2 import Template
@@ -11,30 +11,63 @@ class Reporter:
 
     def to_console(self):
         console = Console()
-        table = Table(title=f"FortiGate CIS Audit Report - Score: {self.report.get_score():.2f}%")
-        table.add_column("ID", style="cyan")
-        table.add_column("Title")
-        table.add_column("Status", style="bold")
-        table.add_column("Severity")
+        summary = self.report.get_summary()
 
-        for f in self.report.findings:
-            color = "green" if f.status == Status.PASS else "red" if f.status == Status.FAIL else "yellow"
-            table.add_row(f.check_id, f.title, f"[{color}]{f.status.value}[/{color}]", f.severity.value)
+        # Determine if we are doing CIS or Security Audit based on results
+        # If any check result status is PASS or FAIL, it's likely a CIS run
+        # but we should probably show both if they exist.
+
+        is_cis = any(hasattr(f, 'check_id') and f.check_id.startswith('CIS') for f in self.report.findings)
+
+        if is_cis:
+            console.print(f"\n[bold]FortiGate CIS Audit Executive Summary[/bold]")
+            console.print(f"Compliance Score: {self.report.get_score():.2f}%\n")
+        else:
+            console.print(f"\n[bold]Audit Executive Summary[/bold]")
+            console.print(f"Risk Score: {self.report.get_risk_score():.2f}")
+            console.print(f"Performed: {summary['performed']} | Failed: {summary['failed']} | Skipped: {summary['skipped']}\n")
+
+        table = Table(title="Audit Results")
+        table.add_column("Check Name", style="cyan")
+        table.add_column("Status", style="bold")
+        table.add_column("Findings", style="magenta")
+        table.add_column("Duration (s)", justify="right")
+
+        for r in self.report.check_results:
+            status_color = "green" if r.status in [Status.PERFORMED, Status.PASS] else "red" if r.status in [Status.FAILED, Status.FAIL] else "yellow"
+            table.add_row(
+                r.check_name,
+                f"[{status_color}]{r.status.value.upper()}[/{status_color}]",
+                str(len(r.findings)),
+                f"{r.duration_seconds:.2f}"
+            )
 
         console.print(table)
 
     def to_json(self) -> str:
         data = {
-            "score": self.report.get_score(),
-            "findings": [
+            "version": self.report.version,
+            "risk_score": self.report.get_risk_score(),
+            "compliance_score": self.report.get_score(),
+            "summary": self.report.get_summary(),
+            "results": [
                 {
-                    "id": f.check_id,
-                    "title": f.title,
-                    "status": f.status.value,
-                    "severity": f.severity.value,
-                    "message": f.message,
-                    "remediation": f.remediation
-                } for f in self.report.findings
+                    "check_name": r.check_name,
+                    "status": r.status.value,
+                    "timestamp": r.timestamp,
+                    "duration_seconds": r.duration_seconds,
+                    "findings": [
+                        {
+                            "id": f.check_id,
+                            "title": f.title,
+                            "severity": f.severity.value,
+                            "message": f.message,
+                            "remediation": f.remediation
+                        } for f in r.findings
+                    ],
+                    "error_message": r.error_message,
+                    "skip_reason": r.skip_reason
+                } for r in self.report.check_results
             ]
         }
         return json.dumps(data, indent=2)
@@ -42,16 +75,17 @@ class Reporter:
     def to_csv(self, filepath: str):
         with open(filepath, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(["ID", "Title", "Status", "Severity", "Message", "Remediation"])
-            for fnd in self.report.findings:
-                writer.writerow([fnd.check_id, fnd.title, fnd.status.value, fnd.severity.value, fnd.message, fnd.remediation])
+            writer.writerow(["Check Name", "Status", "Findings Count", "Duration", "Error/Skip Reason"])
+            for r in self.report.check_results:
+                reason = r.error_message or r.skip_reason or ""
+                writer.writerow([r.check_name, r.status.value, len(r.findings), r.duration_seconds, reason])
 
-    def to_html(self, is_dashboard=False) -> str:
+    def to_html(self) -> str:
         template_str = """
         <!DOCTYPE html>
         <html>
         <head>
-            <title>FortiGate CIS Audit Dashboard</title>
+            <title>Audit Dashboard</title>
             <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
             <style>
                 body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: #f4f7f6; }
@@ -60,35 +94,52 @@ class Reporter:
                 .summary-cards { display: flex; justify-content: space-around; margin-bottom: 30px; }
                 .card { padding: 20px; border-radius: 8px; text-align: center; flex: 1; margin: 0 10px; color: white; }
                 .score-card { background-color: #3498db; }
-                .pass-card { background-color: #2ecc71; }
-                .fail-card { background-color: #e74c3c; }
+                .performed-card { background-color: #2ecc71; }
+                .failed-card { background-color: #e74c3c; }
+                .skipped-card { background-color: #f39c12; }
                 .chart-container { width: 400px; margin: 20px auto; }
                 table { border-collapse: collapse; width: 100%; margin-top: 20px; }
                 th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
                 th { background-color: #f2f2f2; }
                 tr:hover { background-color: #f9f9f9; }
-                .Pass { color: #2ecc71; font-weight: bold; }
-                .Fail { color: #e74c3c; font-weight: bold; }
-                .Warn { color: #f39c12; font-weight: bold; }
-                pre { background: #f8f8f8; padding: 5px; border-radius: 4px; overflow-x: auto; max-width: 400px; }
+                .status-performed, .status-pass { color: #2ecc71; font-weight: bold; }
+                .status-failed, .status-fail { color: #e74c3c; font-weight: bold; }
+                .status-skipped, .status-skip, .status-warn { color: #f39c12; font-weight: bold; }
+                .remediation-matrix { margin-top: 40px; }
+                .severity-critical { color: white; background: #c0392b; padding: 2px 5px; border-radius: 3px; }
+                .severity-high { color: white; background: #e67e22; padding: 2px 5px; border-radius: 3px; }
+                .severity-medium { color: white; background: #f1c40f; padding: 2px 5px; border-radius: 3px; }
+                .severity-low { color: white; background: #3498db; padding: 2px 5px; border-radius: 3px; }
+                .severity-info { color: white; background: #95a5a6; padding: 2px 5px; border-radius: 3px; }
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>FortiGate CIS Audit Dashboard</h1>
+                <h1>Audit Dashboard - v{{ version }}</h1>
 
                 <div class="summary-cards">
+                    {% if compliance_score > 0 %}
                     <div class="card score-card">
                         <h3>Compliance Score</h3>
-                        <div style="font-size: 2em;">{{ score }}%</div>
+                        <div style="font-size: 2em;">{{ "%.2f"|format(compliance_score) }}%</div>
                     </div>
-                    <div class="card pass-card">
-                        <h3>Passed</h3>
-                        <div style="font-size: 2em;">{{ pass_count }}</div>
+                    {% else %}
+                    <div class="card score-card">
+                        <h3>Risk Score</h3>
+                        <div style="font-size: 2em;">{{ risk_score }}</div>
                     </div>
-                    <div class="card fail-card">
+                    {% endif %}
+                    <div class="card performed-card">
+                        <h3>Performed/Pass</h3>
+                        <div style="font-size: 2em;">{{ summary.performed }}</div>
+                    </div>
+                    <div class="card failed-card">
                         <h3>Failed</h3>
-                        <div style="font-size: 2em;">{{ fail_count }}</div>
+                        <div style="font-size: 2em;">{{ summary.failed }}</div>
+                    </div>
+                    <div class="card skipped-card">
+                        <h3>Skipped</h3>
+                        <div style="font-size: 2em;">{{ summary.skipped }}</div>
                     </div>
                 </div>
 
@@ -96,59 +147,88 @@ class Reporter:
                     <canvas id="statusChart"></canvas>
                 </div>
 
+                <h2>Check Results</h2>
                 <table>
                     <tr>
-                        <th>ID</th>
-                        <th>Title</th>
+                        <th>Check Name</th>
                         <th>Status</th>
-                        <th>Severity</th>
-                        <th>Remediation</th>
+                        <th>Duration (s)</th>
+                        <th>Findings</th>
+                        <th>Details</th>
                     </tr>
-                    {% for f in findings %}
+                    {% for r in results %}
                     <tr>
-                        <td>{{ f.check_id }}</td>
-                        <td>{{ f.title }}</td>
-                        <td class="{{ f.status.value }}">{{ f.status.value }}</td>
-                        <td>{{ f.severity.value }}</td>
-                        <td><pre>{{ f.remediation }}</pre></td>
+                        <td>{{ r.check_name }}</td>
+                        <td class="status-{{ r.status|lower }}">{{ r.status.upper() }}</td>
+                        <td>{{ "%.2f"|format(r.duration_seconds) }}</td>
+                        <td>{{ r.findings|length }}</td>
+                        <td>{{ r.error_message or r.skip_reason or "" }}</td>
                     </tr>
                     {% endfor %}
                 </table>
+
+                <div class="remediation-matrix">
+                    <h2>Remediation Matrix</h2>
+                    <table>
+                        <tr>
+                            <th>Severity</th>
+                            <th>Issue</th>
+                            <th>Remediation</th>
+                            <th>Effort</th>
+                        </tr>
+                        {% for r in results %}
+                            {% for f in r.findings %}
+                            <tr>
+                                <td><span class="severity-{{ f.severity|lower }}">{{ f.severity.upper() }}</span></td>
+                                <td>{{ f.message }}</td>
+                                <td>{{ f.remediation }}</td>
+                                <td>{{ f.effort_estimate }}</td>
+                            </tr>
+                            {% endfor %}
+                        {% endfor %}
+                    </table>
+                </div>
             </div>
 
             <script>
                 const ctx = document.getElementById('statusChart').getContext('2d');
                 new Chart(ctx, {
-                    type: 'pie',
+                    type: 'doughnut',
                     data: {
-                        labels: ['Pass', 'Fail', 'Warn', 'Skip'],
+                        labels: ['Performed/Pass', 'Failed', 'Skipped'],
                         datasets: [{
-                            data: [{{ pass_count }}, {{ fail_count }}, {{ warn_count }}, {{ skip_count }}],
-                            backgroundColor: ['#2ecc71', '#e74c3c', '#f39c12', '#95a5a6']
+                            data: [{{ summary.performed }}, {{ summary.failed }}, {{ summary.skipped }}],
+                            backgroundColor: ['#2ecc71', '#e74c3c', '#f39c12']
                         }]
-                    },
-                    options: {
-                        responsive: true,
-                        plugins: {
-                            title: { display: true, text: 'Findings Distribution' }
-                        }
                     }
                 });
             </script>
         </body>
         </html>
         """
-        pass_count = len([f for f in self.report.findings if f.status == Status.PASS])
-        fail_count = len([f for f in self.report.findings if f.status == Status.FAIL])
-        warn_count = len([f for f in self.report.findings if f.status == Status.WARN])
-        skip_count = len([f for f in self.report.findings if f.status == Status.SKIP])
+        summary = self.report.get_summary()
 
         template = Template(template_str)
         return template.render(
-            score=f"{self.report.get_score():.2f}",
-            findings=self.report.findings,
-            pass_count=pass_count,
-            fail_count=fail_count,
-            warn_count=warn_count,
-            skip_count=skip_count
+            version=self.report.version,
+            risk_score=f"{self.report.get_risk_score():.2f}",
+            compliance_score=self.report.get_score(),
+            summary=summary,
+            results=[
+                {
+                    "check_name": r.check_name,
+                    "status": r.status.value,
+                    "duration_seconds": r.duration_seconds,
+                    "findings": [
+                        {
+                            "severity": f.severity.value,
+                            "message": f.message,
+                            "remediation": f.remediation,
+                            "effort_estimate": f.effort_estimate
+                        } for f in r.findings
+                    ],
+                    "error_message": r.error_message,
+                    "skip_reason": r.skip_reason
+                } for r in self.report.check_results
+            ]
         )

@@ -3,6 +3,7 @@ import sys
 import yaml
 import os
 import webbrowser
+from datetime import datetime
 from fortigate_cis_audit.connectors.base import FileConnector, SSHConnector, APIConnector
 from fortigate_cis_audit.parsers.fortios_parser import parse_config
 from fortigate_cis_audit.engine.audit_engine import AuditEngine
@@ -11,10 +12,16 @@ from fortigate_cis_audit.checks.section1_2 import CheckHTTPSOnly, CheckIdleTimeo
 from fortigate_cis_audit.checks.section3 import CheckSyslogConfigured
 from fortigate_cis_audit.checks.section5 import CheckAnyAnyPolicy
 from fortigate_cis_audit.checks.sections4_7 import CheckNTPConfigured, CheckIKEv2Only, CheckUSBAutoInstall
+from fortigate_cis_audit.checks.security_checks import (
+    DocumentConfig, ReviewSecurityPolicies, CheckRuleShadowing, AuditNATRules,
+    ValidateVPN, AssessLogging, EvaluateAppLayer, CheckFirmware, PerformVulnScan,
+    ReviewChangeMgmt, TestFirewallRules, CreateAuditReport, ImplementRemediation
+)
 from fortigate_cis_audit.models import Status, Severity, CISLevel
 
 def get_all_checks():
     return [
+        # CIS Checks
         CheckHTTPSOnly(),
         CheckIdleTimeout(),
         CheckSSHv2Only(),
@@ -23,6 +30,20 @@ def get_all_checks():
         CheckAnyAnyPolicy(),
         CheckIKEv2Only(),
         CheckUSBAutoInstall(),
+        # Security Checks
+        DocumentConfig(),
+        ReviewSecurityPolicies(),
+        CheckRuleShadowing(),
+        AuditNATRules(),
+        ValidateVPN(),
+        AssessLogging(),
+        EvaluateAppLayer(),
+        CheckFirmware(),
+        PerformVulnScan(),
+        ReviewChangeMgmt(),
+        TestFirewallRules(),
+        CreateAuditReport(),
+        ImplementRemediation()
     ]
 
 @click.command()
@@ -35,22 +56,25 @@ def get_all_checks():
 @click.option('--output', type=click.Choice(['console', 'json', 'html', 'csv']), default='console')
 @click.option('--report-dir', default='reports', help='Directory to save reports')
 @click.option('--dashboard', is_flag=True, help='Generate HTML dashboard and open in browser')
+@click.option('--check', 'include_checks', multiple=True, help='Run individual checks by name or ID')
+@click.option('--skip', 'skip_checks', multiple=True, help='Skip specific checks by name or ID')
 @click.option('--level', type=click.Choice(['L1', 'L2', 'all']), default='all', help='Filter by CIS benchmark level')
 @click.option('--section', help='Comma-separated section numbers to run (e.g., 1,3,5)')
-@click.option('--severity', type=click.Choice(['Critical', 'High', 'Medium', 'Low', 'Info']), help='Filter findings by severity')
-@click.option('--exclude', help='Comma-separated check IDs to skip')
+@click.option('--severity-threshold', type=click.Choice(['critical', 'high', 'medium', 'low', 'info']), help='Filter findings by severity')
+@click.option('--fail-fast', is_flag=True, help='Stop execution on first failed check')
 @click.option('--fail-on-critical', is_flag=True, help='Exit with code 1 if any critical finding')
 @click.option('--list-checks', is_flag=True, help='List all available checks and exit')
-@click.option('--check-id', help='Run only a specific check ID')
-def main(host, user, password, key, file, profile, output, report_dir, dashboard, level, section, severity, exclude, fail_on_critical, list_checks, check_id):
-    """FortiGate CIS Audit Tool"""
+def main(host, user, password, key, file, profile, output, report_dir, dashboard,
+         include_checks, skip_checks, level, section, severity_threshold, fail_fast, fail_on_critical, list_checks):
+    """FortiGate CIS & Security Audit Tool"""
 
     all_available_checks = get_all_checks()
 
     if list_checks:
-        click.echo("Available CIS Checks:")
+        click.echo("Available Checks:")
         for c in all_available_checks:
-            click.echo(f"- {c.check_id}: {c.title} ({c.level.value}, {c.severity.value})")
+            desc = f" ({c.level.value})" if hasattr(c, 'level') else ""
+            click.echo(f"- {c.check_id}: {c.title}{desc}")
         return
 
     # Load profile if provided
@@ -64,18 +88,22 @@ def main(host, user, password, key, file, profile, output, report_dir, dashboard
             file = file or p_data.get('file')
 
     config_text = ""
-    if file:
-        connector = FileConnector(file)
-        config_text = connector.get_config()
-    elif host and user:
-        if password or key:
-            connector = SSHConnector(host, user, password=password, key_filename=key)
+    try:
+        if file:
+            connector = FileConnector(file)
             config_text = connector.get_config()
+        elif host and user:
+            if password or key:
+                connector = SSHConnector(host, user, password=password, key_filename=key)
+                config_text = connector.get_config()
+            else:
+                click.echo("Error: Password or SSH key required for live connection.", err=True)
+                sys.exit(1)
         else:
-            click.echo("Error: Password or SSH key required for live connection.", err=True)
+            click.echo("Error: Either --file or --host/--user must be provided.", err=True)
             sys.exit(1)
-    else:
-        click.echo("Error: Either --file or --host/--user must be provided.", err=True)
+    except Exception as e:
+        click.echo(f"Connection Error: {e}", err=True)
         sys.exit(1)
 
     parsed_config = parse_config(config_text)
@@ -83,58 +111,64 @@ def main(host, user, password, key, file, profile, output, report_dir, dashboard
     # Filter checks
     checks_to_run = all_available_checks
 
-    if check_id:
-        checks_to_run = [c for c in checks_to_run if c.check_id == check_id]
-
     if level != 'all':
-        checks_to_run = [c for c in checks_to_run if c.level.value == level]
+        checks_to_run = [c for c in checks_to_run if hasattr(c, 'level') and c.level.value == level]
 
     if section:
         sections = [s.strip() for s in section.split(',')]
-        checks_to_run = [c for c in checks_to_run if any(c.section.startswith(s) for s in sections)]
+        checks_to_run = [c for c in checks_to_run if hasattr(c, 'section') and any(c.section.startswith(s) for s in sections)]
 
-    if exclude:
-        excludes = [e.strip() for e in exclude.split(',')]
-        checks_to_run = [c for c in checks_to_run if c.check_id not in excludes]
-
-    engine = AuditEngine(parsed_config, checks_to_run)
+    engine = AuditEngine(
+        parsed_config,
+        checks_to_run,
+        fail_fast=fail_fast,
+        include_checks=list(include_checks),
+        skip_checks=list(skip_checks),
+        severity_threshold=severity_threshold
+    )
     report = engine.run()
 
-    # Filter findings by severity if requested
-    if severity:
-        report.findings = [f for f in report.findings if f.severity.value == severity]
-
     reporter = Reporter(report)
-
     os.makedirs(report_dir, exist_ok=True)
-    report_path = ""
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     if dashboard:
         output = 'html'
-        report_path = os.path.join(report_dir, "audit_dashboard.html")
+        report_path = os.path.join(report_dir, f"audit_dashboard_{timestamp}.html")
+    else:
+        report_path = None
 
     if output == 'console':
         reporter.to_console()
     elif output == 'json':
-        click.echo(reporter.to_json())
+        json_data = reporter.to_json()
+        click.echo(json_data)
     elif output == 'html':
         html_content = reporter.to_html()
         if not report_path:
-            report_path = os.path.join(report_dir, "audit_report.html")
+            report_path = os.path.join(report_dir, f"audit_report_{timestamp}.html")
         with open(report_path, "w") as f:
             f.write(html_content)
         click.echo(f"Report saved to {report_path}")
         if dashboard:
             webbrowser.open(f"file://{os.path.abspath(report_path)}")
     elif output == 'csv':
-        report_path = os.path.join(report_dir, "audit_report.csv")
+        report_path = os.path.join(report_dir, f"audit_report_{timestamp}.csv")
         reporter.to_csv(report_path)
         click.echo(f"Report saved to {report_path}")
 
     if fail_on_critical:
-        criticals = [f for f in report.findings if f.severity == Severity.CRITICAL and f.status == Status.FAIL]
-        if criticals:
-            click.echo(f"Found {len(criticals)} critical findings!", err=True)
+        # Check for findings with CRITICAL severity and non-PASS/PERFORMED status
+        failed_criticals = []
+        for r in report.check_results:
+            if r.status in [Status.FAILED, Status.FAIL]:
+                for f in r.findings:
+                    if f.severity == Severity.CRITICAL:
+                        failed_criticals.append(f)
+
+        if failed_criticals:
+            click.echo(f"Found {len(failed_criticals)} critical findings!", err=True)
             sys.exit(1)
 
 if __name__ == '__main__':
