@@ -26,3 +26,7 @@ fortigate-cis-audit = "fortigate_cis_audit.main:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["fortigate_cis_audit*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
