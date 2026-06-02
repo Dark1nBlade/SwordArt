@@ -5,3 +5,6 @@ reports/
 *.html
 *.csv
 *.json
+build/
+dist/
+*.egg-info/
