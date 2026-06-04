@@ -36,10 +36,22 @@ class FortiOSParser:
                 result["edit"][key] = sub_config
                 i = next_i
             elif line.startswith('set '):
-                parts = line[4:].split(maxsplit=1)
+                # Remove 'set ' prefix
+                content = line[4:].strip()
+                # Find the key (first word)
+                parts = content.split(maxsplit=1)
                 if len(parts) == 2:
-                    name, value = parts
-                    result[name] = value.strip('"')
+                    name, rest = parts
+                    # Extract all quoted values: "value1" "value2"
+                    values = re.findall(r'"([^"]*)"', rest)
+                    if not values:
+                        # If no quoted values found, try unquoted single value
+                        result[name] = rest.strip()
+                    elif len(values) == 1:
+                        result[name] = values[0]
+                    else:
+                        # Multiple values (like multiple interfaces or SD-WAN zones)
+                        result[name] = values
                 elif len(parts) == 1:
                     result[parts[0]] = True
                 i += 1

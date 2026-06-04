@@ -16,7 +16,8 @@ from fortigate_cis_audit.checks.security_checks import (
     DocumentConfig, ReviewSecurityPolicies, CheckRuleShadowing, AuditNATRules,
     ValidateVPN, AssessLogging, EvaluateAppLayer, CheckFirmware, PerformVulnScan,
     ReviewChangeMgmt, TestFirewallRules, CreateAuditReport, ImplementRemediation,
-    CheckIPSConfigured
+    CheckIPSConfigured, CheckAVProfile, CheckSSLInspection, CheckAdminTrustedHosts,
+    CheckSNMPConfig, CheckSDWANAppControl
 )
 from fortigate_cis_audit.models import Status, Severity, CISLevel
 
@@ -45,7 +46,12 @@ def get_all_checks():
         TestFirewallRules(),
         CreateAuditReport(),
         ImplementRemediation(),
-        CheckIPSConfigured()
+        CheckIPSConfigured(),
+        CheckAVProfile(),
+        CheckSSLInspection(),
+        CheckAdminTrustedHosts(),
+        CheckSNMPConfig(),
+        CheckSDWANAppControl()
     ]
 
 @click.command()
@@ -68,10 +74,11 @@ def get_all_checks():
 @click.option('--list-checks', is_flag=True, help='List all available checks and exit')
 @click.option('--list-zones', is_flag=True, help='List all configured zones and exit')
 @click.option('--list-interfaces', is_flag=True, help='List all configured interfaces and exit')
+@click.option('--validate-sdwan', is_flag=True, help='Validate SD-WAN zone parsing and exit')
 @click.option('--wan', multiple=True, help='List of WAN interfaces (example: --wan port1 --wan port2)')
 def main(host, user, password, key, file, profile, output, report_dir, dashboard,
          include_checks, skip_checks, level, section, severity_threshold, fail_fast, fail_on_critical, list_checks,
-         list_zones, list_interfaces, wan):
+         list_zones, list_interfaces, validate_sdwan, wan):
     """FortiGate CIS & Security Audit Tool"""
 
     all_available_checks = get_all_checks()
@@ -135,6 +142,24 @@ def main(host, user, password, key, file, profile, output, report_dir, dashboard
                 ip = intf_data.get("ip", "N/A")
                 allowaccess = intf_data.get("allowaccess", "None")
                 click.echo(f"- {intf_name}: {ip} (Allow: {allowaccess})")
+        return
+
+    if validate_sdwan:
+        sdwan_zones = []
+        sdwan_cfg = parsed_config.get("config system sdwan", {})
+        zones = sdwan_cfg.get("config zone", {}).get("edit", {})
+        if zones:
+            sdwan_zones.extend(zones.keys())
+        if "virtual-wan-link" in str(parsed_config):
+            sdwan_zones.append("virtual-wan-link")
+
+        click.echo(f"Identified SD-WAN Zones: {', '.join(sdwan_zones)}")
+
+        policies = parsed_config.get("config firewall policy", {}).get("edit", {})
+        click.echo("\nPolicy Destination Interface Parsing:")
+        for p_id, p_data in policies.items():
+            dstintf = p_data.get("dstintf")
+            click.echo(f"Policy {p_id}: dstintf = {dstintf} (Type: {type(dstintf).__name__})")
         return
 
     # Filter checks

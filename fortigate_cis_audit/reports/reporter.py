@@ -47,17 +47,29 @@ class Reporter:
         # Show detailed findings and remediations
         any_findings = False
         for r in self.report.check_results:
-            if r.findings:
+            # Filter for non-PASS findings
+            display_findings = [f for f in r.findings if f.status != Status.PASS]
+            if display_findings:
                 if not any_findings:
                     console.print(f"\n[bold]Detailed Findings & Remediations[/bold]")
                     any_findings = True
 
-                for f in r.findings:
+                for f in display_findings:
                     sev_color = "red" if f.severity in [Severity.CRITICAL, Severity.HIGH] else "yellow" if f.severity == Severity.MEDIUM else "blue"
                     console.print(f"\n[{sev_color}][{f.severity.value}][/{sev_color}] [bold]{f.title}[/bold]")
                     console.print(f"  Issue: {f.message}")
+                    if f.mitre_techniques:
+                        console.print(f"  [bold blue]MITRE ATT&CK:[/bold blue] {', '.join(f.mitre_techniques)}")
                     if f.remediation:
                         console.print(f"  [green]Remediation:[/green] {f.remediation}")
+
+        # Show Framework Summary
+        fw_summary = self.report.get_framework_summary()
+        console.print(f"\n[bold]Framework Coverage Summary[/bold]")
+        console.print(f"MITRE ATT&CK Techniques: {', '.join(fw_summary['mitre']['techniques']) or 'None'}")
+        console.print(f"NIST CSF Subcategories: {', '.join(fw_summary['nist']['subcategories']) or 'None'}")
+        console.print(f"CIS v8 Safeguards: {', '.join(fw_summary['cis']['safeguards']) or 'None'}")
+        console.print(f"ISO 27001 Controls: {', '.join(fw_summary['iso']['controls']) or 'None'}")
 
     def to_json(self) -> str:
         data = {
@@ -189,6 +201,7 @@ class Reporter:
                             <th>Severity</th>
                             <th>Issue</th>
                             <th>Remediation</th>
+                            <th>Framework Mapping</th>
                             <th>Effort</th>
                         </tr>
                         {% for r in results %}
@@ -197,10 +210,47 @@ class Reporter:
                                 <td><span class="severity-{{ f.severity|lower }}">{{ f.severity.upper() }}</span></td>
                                 <td>{{ f.message }}</td>
                                 <td>{{ f.remediation }}</td>
+                                <td>
+                                    {% if f.mitre %}<b>MITRE:</b> {{ f.mitre|join(', ') }}<br>{% endif %}
+                                    {% if f.nist %}<b>NIST:</b> {{ f.nist|join(', ') }}<br>{% endif %}
+                                    {% if f.cis %}<b>CIS:</b> {{ f.cis|join(', ') }}<br>{% endif %}
+                                    {% if f.iso %}<b>ISO:</b> {{ f.iso|join(', ') }}{% endif %}
+                                </td>
                                 <td>{{ f.effort_estimate }}</td>
                             </tr>
                             {% endfor %}
                         {% endfor %}
+                    </table>
+                </div>
+
+                <div class="remediation-matrix">
+                    <h2>Framework Coverage Summary</h2>
+                    <table>
+                        <tr>
+                            <th>Framework</th>
+                            <th>Detected Controls/Techniques</th>
+                            <th>Count</th>
+                        </tr>
+                        <tr>
+                            <td>MITRE ATT&CK</td>
+                            <td>{{ fw_summary.mitre.techniques|join(', ') }}</td>
+                            <td>{{ fw_summary.mitre.count }}</td>
+                        </tr>
+                        <tr>
+                            <td>NIST CSF 2.0</td>
+                            <td>{{ fw_summary.nist.subcategories|join(', ') }}</td>
+                            <td>{{ fw_summary.nist.count }}</td>
+                        </tr>
+                        <tr>
+                            <td>CIS Controls v8</td>
+                            <td>{{ fw_summary.cis.safeguards|join(', ') }}</td>
+                            <td>{{ fw_summary.cis.count }}</td>
+                        </tr>
+                        <tr>
+                            <td>ISO 27001:2022</td>
+                            <td>{{ fw_summary.iso.controls|join(', ') }}</td>
+                            <td>{{ fw_summary.iso.count }}</td>
+                        </tr>
                     </table>
                 </div>
             </div>
@@ -222,6 +272,7 @@ class Reporter:
         </html>
         """
         summary = self.report.get_summary()
+        fw_summary = self.report.get_framework_summary()
 
         template = Template(template_str)
         return template.render(
@@ -229,6 +280,7 @@ class Reporter:
             risk_score=f"{self.report.get_risk_score():.2f}",
             compliance_score=self.report.get_score(),
             summary=summary,
+            fw_summary=fw_summary,
             results=[
                 {
                     "check_name": r.check_name,
@@ -239,7 +291,11 @@ class Reporter:
                             "severity": f.severity.value,
                             "message": f.message,
                             "remediation": f.remediation,
-                            "effort_estimate": f.effort_estimate
+                            "effort_estimate": f.effort_estimate,
+                            "mitre": f.mitre_techniques,
+                            "nist": f.nist_csf,
+                            "cis": f.cis_v8,
+                            "iso": f.iso27001
                         } for f in r.findings
                     ],
                     "error_message": r.error_message,

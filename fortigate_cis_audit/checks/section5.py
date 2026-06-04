@@ -9,6 +9,10 @@ class CheckAnyAnyPolicy(BaseCheck):
     severity = Severity.CRITICAL
     section = "5. Firewall Policies"
     remediation = "Review policy and restrict source, destination, and services."
+    mitre_techniques = ["T1190", "T1071"]
+    nist_csf = ["PR.AC-04", "PR.PS-04"]
+    cis_v8 = ["4.1", "4.4", "4.5"]
+    iso27001 = ["A.8.1", "A.8.3"]
 
     def audit(self, config: Dict[str, Any]) -> Any:
         policy_cfg = config.get("config firewall policy", {}).get("edit", {})

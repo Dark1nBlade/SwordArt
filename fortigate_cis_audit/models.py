@@ -37,6 +37,10 @@ class Finding:
     effort_estimate: str = "Low"
     level: Optional[CISLevel] = None # For CIS compatibility
     section: str = "" # For CIS compatibility
+    mitre_techniques: List[str] = field(default_factory=list)
+    nist_csf: List[str] = field(default_factory=list)
+    cis_v8: List[str] = field(default_factory=list)
+    iso27001: List[str] = field(default_factory=list)
 
 @dataclass
 class SecurityCheckResult:
@@ -81,4 +85,27 @@ class AuditReport:
             "performed": len([r for r in self.check_results if r.status in [Status.PERFORMED, Status.PASS]]),
             "failed": len([r for r in self.check_results if r.status in [Status.FAILED, Status.FAIL]]),
             "skipped": len([r for r in self.check_results if r.status in [Status.SKIPPED, Status.SKIP]])
+        }
+
+    def get_framework_summary(self) -> Dict[str, Any]:
+        mitre = set()
+        nist = set()
+        cis = set()
+        iso = set()
+
+        all_findings = []
+        for r in self.check_results:
+            all_findings.extend(r.findings)
+
+        for f in all_findings:
+            mitre.update(f.mitre_techniques)
+            nist.update(f.nist_csf)
+            cis.update(f.cis_v8)
+            iso.update(f.iso27001)
+
+        return {
+            "mitre": {"techniques": sorted(list(mitre)), "count": len(mitre)},
+            "nist": {"subcategories": sorted(list(nist)), "count": len(nist)},
+            "cis": {"safeguards": sorted(list(cis)), "count": len(cis)},
+            "iso": {"controls": sorted(list(iso)), "count": len(iso)}
         }
