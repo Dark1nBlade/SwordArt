@@ -69,16 +69,24 @@ class AuditReport:
         return (passed / total) * 100
 
     def get_risk_score(self) -> float:
+        """
+        Calculates a risk score from 0-100.
+        0: No findings (Secure)
+        100: Critical findings present (High Risk)
+        """
         performed = [r for r in self.check_results if r.status in [Status.PERFORMED, Status.PASS]]
         if not performed: return 0.0
 
-        score = 0
+        total_weight = 0
         for r in performed:
             for f in r.findings:
-                if f.severity == Severity.CRITICAL: score += 10
-                elif f.severity == Severity.HIGH: score += 5
-                elif f.severity == Severity.MEDIUM: score += 2
-        return score
+                if f.severity == Severity.CRITICAL: total_weight += 20
+                elif f.severity == Severity.HIGH: total_weight += 10
+                elif f.severity == Severity.MEDIUM: total_weight += 5
+                elif f.severity == Severity.LOW: total_weight += 1
+
+        # Cap at 100
+        return min(100.0, float(total_weight))
 
     def get_summary(self) -> Dict[str, int]:
         return {

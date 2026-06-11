@@ -17,7 +17,8 @@ from fortigate_cis_audit.checks.security_checks import (
     ValidateVPN, AssessLogging, EvaluateAppLayer, CheckFirmware, PerformVulnScan,
     ReviewChangeMgmt, TestFirewallRules, CreateAuditReport, ImplementRemediation,
     CheckIPSConfigured, CheckAVProfile, CheckSSLInspection, CheckAdminTrustedHosts,
-    CheckSNMPConfig, CheckSDWANAppControl
+    CheckSNMPConfig, CheckSDWANAppControl, CheckWeakCrypto, CheckExposedManagement,
+    CheckSSLVPNConfig
 )
 from fortigate_cis_audit.models import Status, Severity, CISLevel
 
@@ -51,7 +52,10 @@ def get_all_checks():
         CheckSSLInspection(),
         CheckAdminTrustedHosts(),
         CheckSNMPConfig(),
-        CheckSDWANAppControl()
+        CheckSDWANAppControl(),
+        CheckWeakCrypto(),
+        CheckExposedManagement(),
+        CheckSSLVPNConfig()
     ]
 
 @click.command()
@@ -69,6 +73,8 @@ def get_all_checks():
 @click.option('--level', type=click.Choice(['L1', 'L2', 'all']), default='all', help='Filter by CIS benchmark level')
 @click.option('--section', help='Comma-separated section numbers to run (e.g., 1,3,5)')
 @click.option('--severity-threshold', type=click.Choice(['critical', 'high', 'medium', 'low', 'info']), help='Filter findings by severity')
+@click.option('--remediate', is_flag=True, help='Automatically apply low-risk remediations')
+@click.option('--dry-run', is_flag=True, default=True, help='Show remediation actions without applying them')
 @click.option('--fail-fast', is_flag=True, help='Stop execution on first failed check')
 @click.option('--fail-on-critical', is_flag=True, help='Exit with code 1 if any critical finding')
 @click.option('--list-checks', is_flag=True, help='List all available checks and exit')
@@ -77,7 +83,8 @@ def get_all_checks():
 @click.option('--validate-sdwan', is_flag=True, help='Validate SD-WAN zone parsing and exit')
 @click.option('--wan', multiple=True, help='List of WAN interfaces (example: --wan port1 --wan port2)')
 def main(host, user, password, key, file, profile, output, report_dir, dashboard,
-         include_checks, skip_checks, level, section, severity_threshold, fail_fast, fail_on_critical, list_checks,
+         include_checks, skip_checks, level, section, severity_threshold, remediate, dry_run,
+         fail_fast, fail_on_critical, list_checks,
          list_zones, list_interfaces, validate_sdwan, wan):
     """FortiGate CIS & Security Audit Tool"""
 
@@ -182,6 +189,11 @@ def main(host, user, password, key, file, profile, output, report_dir, dashboard
         wan_interfaces=list(wan)
     )
     report = engine.run()
+
+    if remediate:
+        from fortigate_cis_audit.engine.remediation_engine import RemediationEngine
+        remediator = RemediationEngine(report, dry_run=dry_run)
+        remediator.remediate_all()
 
     reporter = Reporter(report)
     os.makedirs(report_dir, exist_ok=True)

@@ -89,7 +89,11 @@ class Reporter:
                             "title": f.title,
                             "severity": f.severity.value,
                             "message": f.message,
-                            "remediation": f.remediation
+                            "remediation": f.remediation,
+                            "mitre_techniques": f.mitre_techniques,
+                            "nist_csf": f.nist_csf,
+                            "cis_v8": f.cis_v8,
+                            "iso27001": f.iso27001
                         } for f in r.findings
                     ],
                     "error_message": r.error_message,
@@ -133,6 +137,8 @@ class Reporter:
                 .status-failed, .status-fail { color: #e74c3c; font-weight: bold; }
                 .status-skipped, .status-skip, .status-warn { color: #f39c12; font-weight: bold; }
                 .remediation-matrix { margin-top: 40px; }
+                .playbook-card { border-left: 5px solid #4f46e5; background: #f9fafb; padding: 15px; margin-bottom: 15px; }
+                .playbook-code { background: #1e1e2e; color: #dcd7ba; padding: 10px; display: block; white-space: pre-wrap; font-family: 'Courier New', Courier, monospace; }
                 .severity-critical { color: white; background: #c0392b; padding: 2px 5px; border-radius: 3px; }
                 .severity-high { color: white; background: #e67e22; padding: 2px 5px; border-radius: 3px; }
                 .severity-medium { color: white; background: #f1c40f; padding: 2px 5px; border-radius: 3px; }
@@ -195,32 +201,26 @@ class Reporter:
                 </table>
 
                 <div class="remediation-matrix">
-                    <h2>Remediation Matrix</h2>
-                    <table>
-                        <tr>
-                            <th>Severity</th>
-                            <th>Issue</th>
-                            <th>Remediation</th>
-                            <th>Framework Mapping</th>
-                            <th>Effort</th>
-                        </tr>
-                        {% for r in results %}
-                            {% for f in r.findings %}
-                            <tr>
-                                <td><span class="severity-{{ f.severity|lower }}">{{ f.severity.upper() }}</span></td>
-                                <td>{{ f.message }}</td>
-                                <td>{{ f.remediation }}</td>
-                                <td>
-                                    {% if f.mitre %}<b>MITRE:</b> {{ f.mitre|join(', ') }}<br>{% endif %}
-                                    {% if f.nist %}<b>NIST:</b> {{ f.nist|join(', ') }}<br>{% endif %}
-                                    {% if f.cis %}<b>CIS:</b> {{ f.cis|join(', ') }}<br>{% endif %}
-                                    {% if f.iso %}<b>ISO:</b> {{ f.iso|join(', ') }}{% endif %}
-                                </td>
-                                <td>{{ f.effort_estimate }}</td>
-                            </tr>
-                            {% endfor %}
+                    <h2>Actionable Remediation Playbook</h2>
+                    {% for r in results %}
+                        {% for f in r.findings %}
+                        <div class="playbook-card">
+                            <span class="severity-{{ f.severity|lower }}">{{ f.severity.upper() }}</span>
+                            <strong>{{ f.title }}</strong>
+                            <p><em>Issue:</em> {{ f.message }}</p>
+                            {% if f.remediation %}
+                            <p><strong>Remediation Steps:</strong></p>
+                            <div class="playbook-code">{{ f.remediation }}</div>
+                            {% endif %}
+                            <div style="font-size: 0.85em; color: #666; margin-top: 10px;">
+                                {% if f.mitre %}<b>MITRE:</b> {{ f.mitre|join(', ') }} | {% endif %}
+                                {% if f.nist %}<b>NIST:</b> {{ f.nist|join(', ') }} | {% endif %}
+                                {% if f.cis %}<b>CIS:</b> {{ f.cis|join(', ') }} | {% endif %}
+                                {% if f.iso %}<b>ISO:</b> {{ f.iso|join(', ') }}{% endif %}
+                            </div>
+                        </div>
                         {% endfor %}
-                    </table>
+                    {% endfor %}
                 </div>
 
                 <div class="remediation-matrix">

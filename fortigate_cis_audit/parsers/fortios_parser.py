@@ -8,6 +8,16 @@ class FortiOSParser:
     def parse(self) -> Dict[str, Any]:
         lines = self.config_text.splitlines()
         result, _ = self._parse_recursive(lines, 0)
+
+        # Try to extract version from header if not in config
+        version_match = re.search(r'#config-version=FortiGate-VM64-([^:]+)', self.config_text)
+        if version_match:
+            result["version_info"] = version_match.group(1)
+        else:
+            v_alt = re.search(r'set version ([^\n]+)', self.config_text)
+            if v_alt:
+                result["version_info"] = v_alt.group(1).strip()
+
         return result
 
     def _parse_recursive(self, lines: List[str], index: int) -> tuple[Dict[str, Any], int]:
