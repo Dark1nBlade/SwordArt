@@ -20,10 +20,12 @@ class Reporter:
         is_cis = any(hasattr(f, 'check_id') and f.check_id.startswith('CIS') for f in self.report.findings)
 
         if is_cis:
-            console.print(f"\n[bold]FortiGate CIS Audit Executive Summary[/bold]")
+            console.print(f"\n[bold cyan]FortiGate CIS Audit Executive Summary[/bold cyan]")
+            console.print(f"[white]made by Dark1nBlade[/white]")
             console.print(f"Compliance Score: {self.report.get_score():.2f}%\n")
         else:
-            console.print(f"\n[bold]Audit Executive Summary[/bold]")
+            console.print(f"\n[bold cyan]Audit Executive Summary[/bold cyan]")
+            console.print(f"[white]made by Dark1nBlade[/white]")
             console.print(f"Risk Score: {self.report.get_risk_score():.2f}")
             console.print(f"Performed: {summary['performed']} | Failed: {summary['failed']} | Skipped: {summary['skipped']}\n")
 
@@ -148,7 +150,8 @@ class Reporter:
         </head>
         <body>
             <div class="container">
-                <h1>Audit Dashboard - v{{ version }}</h1>
+                <h1>FortiGate CIS & Security Audit Dashboard</h1>
+                <div style="text-align: center; color: #666; margin-top: -15px; margin-bottom: 20px;">made by Dark1nBlade | v{{ version }}</div>
 
                 <div class="summary-cards">
                     {% if compliance_score > 0 %}
