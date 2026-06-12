@@ -34,12 +34,14 @@ class FortiOSParser:
                 return result, i + 1
 
             if line.startswith('config '):
-                key = line[7:].strip()
+                # Normalize spaces: 'config system  global' -> 'config system global'
+                key = " ".join(line[7:].strip().split())
                 sub_config, next_i = self._parse_recursive(lines, i + 1)
                 result[f"config {key}"] = sub_config
                 i = next_i
             elif line.startswith('edit '):
-                key = line[5:].strip().strip('"')
+                # Normalize spaces in edit keys
+                key = " ".join(line[5:].strip().strip('"').split())
                 sub_config, next_i = self._parse_recursive(lines, i + 1)
                 if "edit" not in result:
                     result["edit"] = {}

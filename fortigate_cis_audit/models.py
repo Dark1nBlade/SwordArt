@@ -61,12 +61,39 @@ class AuditReport:
     version: str = "0.2.0"
 
     def get_score(self) -> float:
-        # CIS score compatibility
-        total = len([f for f in self.findings if f.status != Status.SKIP])
-        if total == 0:
+        """
+        Calculate a unified compliance score across all checks.
+        A check is considered 'passed' if:
+        1. It has status PASS.
+        2. It has status PERFORMED and either no findings or only findings with status PASS.
+        """
+        relevant_results = [r for r in self.check_results if r.status not in [Status.SKIP, Status.SKIPPED]]
+        if not relevant_results:
             return 0.0
-        passed = len([f for f in self.findings if f.status == Status.PASS])
-        return (passed / total) * 100
+
+        passed_count = 0
+        for r in relevant_results:
+            if r.status == Status.PASS:
+                passed_count += 1
+            elif r.status == Status.PERFORMED:
+                # If it's a legacy CIS check wrapped in a result, check the finding status
+                if r.findings:
+                    if all(f.status == Status.PASS or f.status is None for f in r.findings):
+                        # For non-CIS checks, status is None. We consider PERFORMED with findings as 'failed'
+                        # in terms of compliance if those findings represent issues.
+                        # However, some PERFORMED checks might just be 'Info'.
+                        if all(f.severity == Severity.INFO for f in r.findings):
+                            passed_count += 1
+                        elif any(f.severity.value in ["Critical", "High", "Medium", "Low"] for f in r.findings):
+                            # It has actual security findings, so it's not 'compliant'
+                            pass
+                        else:
+                            passed_count += 1
+                else:
+                    # Performed with no findings is a pass
+                    passed_count += 1
+
+        return (passed_count / len(relevant_results)) * 100
 
     def get_risk_score(self) -> float:
         """
