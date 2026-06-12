@@ -88,6 +88,11 @@ def main(host, user, password, key, file, profile, output, report_dir, dashboard
          list_zones, list_interfaces, validate_sdwan, wan):
     """FortiGate CIS & Security Audit Tool"""
 
+    click.echo("\n" + "="*60)
+    click.echo(click.style("   FortiGate CIS & Security Audit Tool   ", bold=True, fg='cyan'))
+    click.echo(click.style("          made by Dark1nBlade          ", italic=True, fg='white'))
+    click.echo("="*60 + "\n")
+
     all_available_checks = get_all_checks()
 
     if list_checks:
